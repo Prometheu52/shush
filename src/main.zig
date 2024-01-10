@@ -50,11 +50,10 @@ const SHA256_core = struct {
         }
 
         for (16..self.w_block.len) |i| {
-            const val = 
-                SHA256_core.sig_one(self.w_block[i-2]) +% 
-                self.w_block[i-7] +% 
-                SHA256_core.sig_zero(self.w_block[i-15]) +% 
-                self.w_block[i-16];
+            const val = SHA256_core.sig_one(self.w_block[i-2]) 
+                +% self.w_block[i-7] 
+                +% SHA256_core.sig_zero(self.w_block[i-15]) 
+                +% self.w_block[i-16];
             self.w_block[i] = val;
         }
 
