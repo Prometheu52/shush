@@ -109,7 +109,7 @@ pub fn main() !void {
     var buf_reader = std.io.bufferedReader(file.reader());
     var in_stream = buf_reader.reader();
 
-    var big_boi_buff = [_]u8{0} ** (64 * 16);
+    var big_boi_buff = [_]u8{0} ** (64 * 1024);
     var message_block = [_]u8{0} ** 64;
     message_block[0] = 0x80;
 
