@@ -84,8 +84,8 @@ const SHA256_core = struct {
 
     }
 
-    fn getHashString(self: SHA256_core, allocator: std.mem.Allocator) []const u8 {
-        const str = std.fmt.allocPrint(allocator, "{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}", .{self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], self.state[5], self.state[6], self.state[7]}) catch "FMT FAILED";
+    fn getHashString(self: SHA256_core, buf: *[64]u8) []const u8 {
+        const str = std.fmt.bufPrint(buf, "{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}", .{self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], self.state[5], self.state[6], self.state[7]}) catch "FMT FAILED";
         return str;
     }
     
@@ -93,7 +93,6 @@ const SHA256_core = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const result_str_allocator = std.heap.page_allocator;
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
@@ -135,17 +134,23 @@ pub fn main() !void {
             const start = processed_chunks * 64;
             const end = if (start + 64 > bytes_read) bytes_read else start + 64;
 
+            // std.debug.print("[{d:>5}..{d:<5}] -> {d:<6}\n", .{start, end, end - start});
+
+            if (end % 64 != 0) message_block = [_]u8{0} ** 64;
+            
             for (big_boi_buff[start..end], 0..) |item, i| {
                 message_block[i] = item;
             }
 
-            if (end % 64 < 56) {
+            if (end % 64 < 56 and end % 64 != 0) {
+                // std.debug.print("{d: >2} < 56\n", .{end % 64});
                 message_block[end % 64] = 0x80;
                 const size = std.mem.nativeToBig(u64, sha256.message_len * 8);
                 for (std.mem.asBytes(&size), 56..) |byte, i| {
                     message_block[i] = byte;
                 }
-            } else if (end % 64 > 56 and end % 64 != 0) {
+            } else if (end % 64 > 56) {
+                // std.debug.print("{d: >2} > 56\n", .{end % 64});
                 message_block[end % 64] = 0x80;
                 sha256.digest_block(message_block);
 
@@ -157,22 +162,24 @@ pub fn main() !void {
             }
 
             sha256.digest_block(message_block);
+            // pretty_print_buf(&message_block, 4);
 
             if (bytes_read == end) break;
             
         }
     }
 
-    std.debug.print("{s}", .{sha256.getHashString(result_str_allocator)});
+    var res: [64]u8 = undefined;
+    std.debug.print("{s}", .{sha256.getHashString(&res)});
    
 }
 
 fn pretty_print_buf(buf: []u8, col_num: u32) void {
     for (buf, 1..) |byte, i| {
         if (i % col_num == 0) {
-            std.debug.print("{s:>2}{X:<3} \n\n", .{"0x", byte});
+            std.debug.print("{s:>2}{X:0<2} \n\n", .{"0x", byte});
             continue;
         }
-        std.debug.print("{s:>2}{X:<3} ", .{"0x", byte});
+        std.debug.print("{s:>2}{X:0<2} ", .{"0x", byte});
     }
 }
