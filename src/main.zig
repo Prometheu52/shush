@@ -78,13 +78,19 @@ const SHA256_core = struct {
             block_state[0] = tmp1 +% tmp2;
         }
 
-        for (0..self.state.len) |i| {
-            self.state[i] +%= block_state[i];
+        // for (0..self.state.len) |i| {
+        //     self.state[i] +%= block_state[i];
+        // }
+
+        for (&self.state, block_state) |*old, new| {
+            old.* +%= new;
         }
 
     }
 
+    // DANGER: Possible dangling pointer?
     fn getHashString(self: SHA256_core, buf: *[64]u8) []const u8 {
+        // Does this thing puts that into the buffer and than returns it anyway?
         const str = std.fmt.bufPrint(buf, "{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}{X:0>4}", .{self.state[0], self.state[1], self.state[2], self.state[3], self.state[4], self.state[5], self.state[6], self.state[7]}) catch "FMT FAILED";
         return str;
     }
@@ -92,24 +98,36 @@ const SHA256_core = struct {
 };
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
     // Discard the first argument
     _ = args.skip();
+    // TODO: This orelse part should be moved into a test;
+    //       otherwise return with MissingParamError
     const file_path = args.next() orelse "C:\\Users\\mgfea\\Dev\\Zig\\shush\\input.txt";
 
     const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
         std.debug.print("Error: {any}", .{err});
-        return;
+        std.os.exit(1);
     };
     defer file.close();
 
     var buf_reader = std.io.bufferedReader(file.reader());
     var in_stream = buf_reader.reader();
 
-    var big_boi_buff = [_]u8{0} ** (64 * 1024);
+    // Maybe bigger buffer == faster compute?
+    const max_size = 1024 * 16;
+    const file_stat = try file.metadata();
+    const file_size: usize = @intCast(file_stat.size()); // I'm sure this cast will always be fine ;)
+    const read_size = if (file_stat.size() > max_size) max_size else 64 - (file_size % 64) + file_size;
+
+    var big_boi_heap_buff = try allocator.alloc(u8, read_size);
+    defer allocator.free(big_boi_heap_buff);
+
     var message_block = [_]u8{0} ** 64;
     message_block[0] = 0x80;
 
@@ -117,9 +135,11 @@ pub fn main() !void {
 
     var is_first_run = true;
     while(true):(is_first_run = false) {
-        const bytes_read = try in_stream.read(&big_boi_buff);
+        const bytes_read = try in_stream.read(big_boi_heap_buff);
         if (bytes_read == 0) {
             if (is_first_run) {
+                // TODO: This should not be computed!
+                // Just look up what is the hash of an empty string and set the state to that
                 sha256.digest_block(message_block);
             }
             break;
@@ -127,8 +147,8 @@ pub fn main() !void {
 
         sha256.message_len += bytes_read;
 
-        std.debug.assert(big_boi_buff.len % 64 == 0);
-        const chunks = big_boi_buff.len / 64;
+        std.debug.assert(big_boi_heap_buff.len % 64 == 0);
+        const chunks = big_boi_heap_buff.len / 64;
 
         for (0..chunks) |processed_chunks| {
             const start = processed_chunks * 64;
@@ -136,9 +156,10 @@ pub fn main() !void {
 
             // std.debug.print("[{d:>5}..{d:<5}] -> {d:<6}\n", .{start, end, end - start});
 
+            // PERF: Do we need the check?
             if (end % 64 != 0) message_block = [_]u8{0} ** 64;
             
-            for (big_boi_buff[start..end], 0..) |item, i| {
+            for (big_boi_heap_buff[start..end], 0..) |item, i| {
                 message_block[i] = item;
             }
 
@@ -164,22 +185,25 @@ pub fn main() !void {
             sha256.digest_block(message_block);
             // pretty_print_buf(&message_block, 4);
 
+            // If there is no more data to be processed than break
             if (bytes_read == end) break;
             
         }
     }
 
     var res: [64]u8 = undefined;
-    std.debug.print("{s}", .{sha256.getHashString(&res)});
+    _ = sha256.getHashString(&res);
+    std.debug.print("{s}", .{res});
    
 }
 
-fn pretty_print_buf(buf: []u8, col_num: u32) void {
-    for (buf, 1..) |byte, i| {
-        if (i % col_num == 0) {
-            std.debug.print("{s:>2}{X:0<2} \n\n", .{"0x", byte});
-            continue;
-        }
-        std.debug.print("{s:>2}{X:0<2} ", .{"0x", byte});
-    }
-}
+// Relic of the debugging days :D
+// fn pretty_print_buf(buf: []u8, col_num: u32) void {
+//     for (buf, 1..) |byte, i| {
+//         if (i % col_num == 0) {
+//             std.debug.print("{s:>2}{X:0<2} \n\n", .{"0x", byte});
+//             continue;
+//         }
+//         std.debug.print("{s:>2}{X:0<2} ", .{"0x", byte});
+//     }
+// }
